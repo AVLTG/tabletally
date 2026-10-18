@@ -35,10 +35,11 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
 
   // User management state
-  const [users, setUsers] = useState<Array<{ id: string; name: string; moxfieldCollectionId: string }>>([]);
+  const [users, setUsers] = useState<Array<{ id: string; name: string; moxfieldCollectionId: string; moxfieldUsername: string | null }>>([]);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [addName, setAddName] = useState("");
   const [addCollectionId, setAddCollectionId] = useState("");
+  const [addMoxfieldUsername, setAddMoxfieldUsername] = useState("");
   const [userMessage, setUserMessage] = useState("");
   const [isAdding, setIsAdding] = useState(false);
 
@@ -49,6 +50,11 @@ export default function AdminPage() {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [editError, setEditError] = useState("");
+
+  // Inline Moxfield username edit state (drives nightly deck auto-sync)
+  const [editingUsernameId, setEditingUsernameId] = useState<string | null>(null);
+  const [usernameEditValue, setUsernameEditValue] = useState("");
+  const [usernameEditError, setUsernameEditError] = useState("");
 
   // Expandable sync history state
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
@@ -132,13 +138,18 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: addName, moxfieldCollectionId: addCollectionId }),
+        body: JSON.stringify({
+          name: addName,
+          moxfieldCollectionId: addCollectionId,
+          ...(addMoxfieldUsername.trim() ? { moxfieldUsername: addMoxfieldUsername.trim() } : {}),
+        }),
       });
       const data = await res.json();
       if (res.ok) {
         setUserMessage("User added successfully!");
         setAddName("");
         setAddCollectionId("");
+        setAddMoxfieldUsername("");
         fetchUsers();
       } else {
         setUserMessage(`Error: ${data.error}`);
@@ -170,6 +181,28 @@ export default function AdminPage() {
       }
     } catch {
       setEditError("Network error");
+    }
+  }
+
+  async function handleSaveUsername(userId: string) {
+    const trimmed = usernameEditValue.trim();
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(trimmed ? { moxfieldUsername: trimmed } : { moxfieldUsername: null }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setUsers(prev => prev.map(u => u.id === userId ? { ...u, moxfieldUsername: updated.moxfieldUsername } : u));
+        setEditingUsernameId(null);
+        setUsernameEditError("");
+      } else {
+        const data = await res.json();
+        setUsernameEditError(data.error || "Failed to save");
+      }
+    } catch {
+      setUsernameEditError("Network error");
     }
   }
 
@@ -286,6 +319,47 @@ export default function AdminPage() {
                       </span>
                     )}
                   </div>
+                  <div className="min-w-0">
+                    {editingUsernameId === user.id ? (
+                      <span className="inline-flex items-center gap-1">
+                        <input
+                          autoFocus
+                          value={usernameEditValue}
+                          onChange={(e) => setUsernameEditValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); handleSaveUsername(user.id); }
+                            if (e.key === "Escape") { setEditingUsernameId(null); setUsernameEditError(""); }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          placeholder="username"
+                          maxLength={30}
+                          className="font-mono text-sm px-1 py-0.5 rounded border border-accent bg-background text-foreground focus:outline-none w-40"
+                        />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleSaveUsername(user.id); }}
+                          className="text-xs px-2 py-0.5 rounded bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer"
+                        >
+                          Save
+                        </button>
+                        {usernameEditError && <span className="text-xs text-red-400">{usernameEditError}</span>}
+                      </span>
+                    ) : (
+                      <span
+                        className={`inline-block text-sm sm:ml-2 truncate cursor-pointer hover:text-foreground transition-colors ${
+                          user.moxfieldUsername ? "text-accent/80" : "text-muted/60"
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingUsernameId(user.id);
+                          setUsernameEditValue(user.moxfieldUsername ?? "");
+                          setUsernameEditError("");
+                        }}
+                        title="Moxfield account — click to edit. Enables nightly public-deck auto-sync."
+                      >
+                        {user.moxfieldUsername ? `@${user.moxfieldUsername}` : "+ Moxfield username"}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1.5 text-xs text-muted">
                       <StatusDot status={(syncSummary[user.id]?.status as "success" | "failure") ?? "unknown"} />
@@ -362,6 +436,14 @@ export default function AdminPage() {
             onChange={(e) => setAddCollectionId(e.target.value)}
             placeholder="Moxfield Collection ID"
             required
+            className="block w-full px-3 py-2.5 rounded-lg border border-border bg-background text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors"
+          />
+          <input
+            type="text"
+            value={addMoxfieldUsername}
+            onChange={(e) => setAddMoxfieldUsername(e.target.value)}
+            placeholder="Moxfield username (optional — enables public-deck auto-sync)"
+            maxLength={30}
             className="block w-full px-3 py-2.5 rounded-lg border border-border bg-background text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors"
           />
           <button

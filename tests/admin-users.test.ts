@@ -64,7 +64,7 @@ describe('GET /api/admin/users', () => {
     const result = await GET();
 
     expect(mockFindMany).toHaveBeenCalledWith({
-      select: { id: true, name: true, moxfieldCollectionId: true, username: true, role: true },
+      select: { id: true, name: true, moxfieldCollectionId: true, moxfieldUsername: true, username: true, role: true },
       orderBy: { name: 'asc' },
     });
     expect((result as any).status).toBe(200);
@@ -135,6 +135,42 @@ describe('POST /api/admin/users', () => {
     expect((result as any).status).toBe(403);
     expect(mockCreate).not.toHaveBeenCalled();
   });
+
+  it('POST stores a valid Moxfield username when provided', async () => {
+    mockCreate.mockResolvedValue({ id: '3', name: 'Carol', moxfieldCollectionId: 'ghi', moxfieldUsername: 'carol_mtg' });
+
+    const result = await POST(makeRequest({ name: 'Carol', moxfieldCollectionId: 'ghi', moxfieldUsername: ' carol_mtg ' }));
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: { name: 'Carol', moxfieldCollectionId: 'ghi', moxfieldUsername: 'carol_mtg' },
+    });
+    expect((result as any).status).toBe(201);
+  });
+
+  it('POST omits the username field when left blank', async () => {
+    mockCreate.mockResolvedValue({ id: '4', name: 'Dan', moxfieldCollectionId: 'jkl' });
+
+    await POST(makeRequest({ name: 'Dan', moxfieldCollectionId: 'jkl', moxfieldUsername: '  ' }));
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: { name: 'Dan', moxfieldCollectionId: 'jkl' },
+    });
+  });
+
+  it('POST rejects a malformed Moxfield username (400)', async () => {
+    const result = await POST(makeRequest({ name: 'Bob', moxfieldCollectionId: 'def', moxfieldUsername: 'no spaces!' }));
+    expect((result as any).status).toBe(400);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('POST maps a username unique violation to a specific 409 message', async () => {
+    mockCreate.mockRejectedValue({ code: 'P2002', meta: { target: ['moxfieldUsername'] } });
+
+    const result = await POST(makeRequest({ name: 'Bob', moxfieldCollectionId: 'def', moxfieldUsername: 'taken' }));
+
+    expect((result as any).status).toBe(409);
+    expect((result as any).body.error).toMatch(/Moxfield username/);
+  });
 });
 
 describe('DELETE /api/admin/users/[id]', () => {
@@ -188,10 +224,48 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(mockUpdate).toHaveBeenCalledWith({
       where: { id: '1' },
       data: { moxfieldCollectionId: 'new-id-123' },
-      select: { id: true, name: true, moxfieldCollectionId: true },
+      select: { id: true, name: true, moxfieldCollectionId: true, moxfieldUsername: true },
     });
     expect((result as any).status).toBe(200);
     expect((result as any).body).toEqual(updatedUser);
+  });
+
+  it('PATCH sets a Moxfield username on its own', async () => {
+    mockUpdate.mockResolvedValue({ id: '1', name: 'Alice', moxfieldCollectionId: 'abc', moxfieldUsername: 'alice' });
+
+    const result = await PATCH(makeRequest({ moxfieldUsername: ' alice ' }), {
+      params: Promise.resolve({ id: '1' }),
+    });
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      where: { id: '1' },
+      data: { moxfieldUsername: 'alice' },
+      select: { id: true, name: true, moxfieldCollectionId: true, moxfieldUsername: true },
+    });
+    expect((result as any).status).toBe(200);
+  });
+
+  it('PATCH clears the Moxfield username on null', async () => {
+    mockUpdate.mockResolvedValue({ id: '1', name: 'Alice', moxfieldCollectionId: 'abc', moxfieldUsername: null });
+
+    const result = await PATCH(makeRequest({ moxfieldUsername: null }), {
+      params: Promise.resolve({ id: '1' }),
+    });
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      where: { id: '1' },
+      data: { moxfieldUsername: null },
+      select: { id: true, name: true, moxfieldCollectionId: true, moxfieldUsername: true },
+    });
+    expect((result as any).status).toBe(200);
+  });
+
+  it('PATCH rejects a malformed Moxfield username (400)', async () => {
+    const result = await PATCH(makeRequest({ moxfieldUsername: 'x' }), {
+      params: Promise.resolve({ id: '1' }),
+    });
+    expect((result as any).status).toBe(400);
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it('PATCH returns 400 when moxfieldCollectionId is empty', async () => {
@@ -204,14 +278,14 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect((result as any).body).toEqual({ error: 'Collection ID is required' });
   });
 
-  it('PATCH returns 400 when moxfieldCollectionId is missing', async () => {
+  it('PATCH returns 400 when no updatable field is provided', async () => {
     const result = await PATCH(makeRequest({}), {
       params: Promise.resolve({ id: '1' }),
     });
 
     expect(mockUpdate).not.toHaveBeenCalled();
     expect((result as any).status).toBe(400);
-    expect((result as any).body).toEqual({ error: 'Collection ID is required' });
+    expect((result as any).body).toEqual({ error: 'Provide moxfieldCollectionId and/or moxfieldUsername to update' });
   });
 
   it('PATCH returns 409 when collection ID is already in use', async () => {

@@ -34,6 +34,94 @@ export default function DecksPage() {
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
   const [urlError, setUrlError] = useState("");
 
+  // Moxfield account connection + deck auto-sync
+  const [moxfieldUsername, setMoxfieldUsername] = useState<string | null>(null);
+  const [connectInput, setConnectInput] = useState("");
+  const [connectError, setConnectError] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isSyncingMoxfield, setIsSyncingMoxfield] = useState(false);
+  const [syncSummaryText, setSyncSummaryText] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/users/me/moxfield");
+        if (res.ok) {
+          const data = await res.json();
+          setMoxfieldUsername(typeof data.moxfieldUsername === "string" ? data.moxfieldUsername : null);
+        }
+      } catch { /* connection status is best-effort */ }
+    })();
+  }, []);
+
+  const connectMoxfield = async () => {
+    setIsConnecting(true);
+    setConnectError("");
+    try {
+      const res = await fetch("/api/users/me/moxfield", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moxfieldUsername: connectInput }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setConnectError(typeof data.error === "string" ? data.error : "Failed to connect");
+        return;
+      }
+      setMoxfieldUsername(data.moxfieldUsername);
+      setConnectInput("");
+    } catch {
+      setConnectError("Network error — try again");
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const disconnectMoxfield = async () => {
+    setConnectError("");
+    try {
+      const res = await fetch("/api/users/me/moxfield", { method: "DELETE" });
+      if (res.ok) setMoxfieldUsername(null);
+    } catch { /* ignore */ }
+  };
+
+  const syncMoxfieldDecks = async () => {
+    setIsSyncingMoxfield(true);
+    setSyncSummaryText("");
+    try {
+      const res = await fetch("/api/decks/sync-moxfield", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setSyncSummaryText(typeof data.error === "string" ? data.error : "Sync failed");
+        return;
+      }
+      const parts: string[] = [];
+      if (data.imported?.length > 0) {
+        parts.push(`Imported ${data.imported.length} deck${data.imported.length !== 1 ? "s" : ""}: ${data.imported.map((d: { name: string }) => d.name).join(", ")}`);
+        const excluded = (data.imported as Array<{ name: string; excludedCards: string[] }>)
+          .filter((d) => d.excludedCards.length > 0);
+        if (excluded.length > 0) {
+          parts.push(`${excluded.length} deck${excluded.length !== 1 ? "s" : ""} skipped cards not in your library (open the deck to see what's missing)`);
+        }
+        await loadDecks();
+      } else {
+        parts.push("No new public decks found");
+      }
+      if (data.skippedLinked?.length > 0) parts.push(`${data.skippedLinked.length} already imported`);
+      if (data.skippedNameCollision?.length > 0) {
+        parts.push(`${data.skippedNameCollision.length} skipped — you already have a deck with that name`);
+      }
+      if (data.failed?.length > 0) {
+        parts.push(`${data.failed.length} failed: ${data.failed.map((f: { name: string; error: string }) => `${f.name} (${f.error})`).join("; ")}`);
+      }
+      setSyncSummaryText(parts.join(" · "));
+    } catch {
+      setSyncSummaryText("Network error — try again");
+    } finally {
+      setIsSyncingMoxfield(false);
+    }
+  };
+
   const fetchFromUrl = async () => {
     setIsFetchingUrl(true);
     setUrlError("");
@@ -223,6 +311,67 @@ export default function DecksPage() {
         </div>
       ) : (
         <>
+          <div className="rounded-lg border border-border bg-surface p-4 mb-8">
+            {moxfieldUsername ? (
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="text-sm">
+                  <span className="font-medium">Moxfield connected</span>{" "}
+                  <span className="text-muted">as </span>
+                  <a
+                    href={`https://www.moxfield.com/users/${moxfieldUsername}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-accent hover:underline"
+                  >
+                    @{moxfieldUsername}
+                  </a>
+                  <span className="text-muted"> — public decks import automatically each night, or sync now.</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={syncMoxfieldDecks}
+                    disabled={isSyncingMoxfield}
+                    className="px-3 py-1.5 rounded-md bg-accent/10 text-accent text-sm font-medium hover:bg-accent/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSyncingMoxfield ? "Syncing…" : "Sync my decks"}
+                  </button>
+                  <button
+                    onClick={disconnectMoxfield}
+                    className="px-3 py-1.5 rounded-md border border-border text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors cursor-pointer"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="text-sm text-muted flex-1">
+                  <span className="font-medium text-foreground">Connect your Moxfield account</span> — enter your
+                  Moxfield username and your public decks import automatically each night.
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={connectInput}
+                    onChange={(e) => setConnectInput(e.target.value)}
+                    placeholder="Moxfield username"
+                    maxLength={30}
+                    className="w-44 px-3 py-2 rounded-md border border-border bg-background text-foreground text-sm"
+                  />
+                  <button
+                    onClick={connectMoxfield}
+                    disabled={isConnecting || connectInput.trim().length < 3}
+                    className="px-4 py-2 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent-hover disabled:opacity-50 cursor-pointer shrink-0"
+                  >
+                    {isConnecting ? "Checking…" : "Connect"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {connectError && <p className="text-sm text-red-400 mt-2">{connectError}</p>}
+            {syncSummaryText && <p className="text-sm text-muted mt-2">{syncSummaryText}</p>}
+          </div>
+
           <div className="flex flex-col sm:flex-row gap-3 mb-8">
             <form onSubmit={handleCreate} className="flex gap-2 flex-1">
               <input

@@ -12,6 +12,7 @@ model User {
   id                    String            @id @default(cuid())
   name                  String
   moxfieldCollectionId  String?           @unique
+  moxfieldUsername      String?           @unique
   lastUpdated           DateTime          @default(now())
   username              String?           @unique
   passwordHash          String?
@@ -127,12 +128,15 @@ model Invite {
 }
 
 model Deck {
-  id          String   @id @default(cuid())
-  ownerUserId String?
-  name        String
-  format      String?
-  commander   String?
-  createdAt   DateTime @default(now())
+  id               String    @id @default(cuid())
+  ownerUserId      String?
+  name             String
+  format           String?
+  commander        String?
+  // Moxfield publicId when this deck was auto-synced/imported from a
+  // moxfield.com/decks/<publicId> link — the dedupe key for auto-sync.
+  moxfieldPublicId String?   @unique
+  createdAt        DateTime  @default(now())
 
   owner User?      @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
   cards DeckCard[]

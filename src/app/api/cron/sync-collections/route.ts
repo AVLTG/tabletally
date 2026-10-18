@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { updateAllCollections } from '@/lib/updateCollections'
+import { syncAllMoxfieldDecks } from '@/lib/moxfieldDeckSync'
 import { sendDiscordAlert } from '@/lib/discord'
 
 export const maxDuration = 300
@@ -35,17 +36,38 @@ export async function GET(request: NextRequest) {
 
   try {
     const { succeeded, failed } = await updateAllCollections('cron')
-    if (failed.length > 0) {
-      const lines = failed.map(f => `- ${f.name}: ${f.error}`).join('\n')
+
+    // Deck auto-sync is best-effort: a failure here must not fail the cron
+    // run or mask the collection-sync result above.
+    let decksImported = 0
+    let deckSyncFailedUsers = 0
+    try {
+      const deckSync = await syncAllMoxfieldDecks()
+      decksImported = deckSync.results.reduce((n, r) => n + r.imported.length, 0)
+      deckSyncFailedUsers = deckSync.failedUsers.length
+    } catch (error) {
+      console.error('Moxfield deck sync failed:', error)
+    }
+
+    const deckNote = decksImported > 0 ? ` (+${decksImported} new Moxfield deck${decksImported !== 1 ? 's' : ''})` : ''
+    if (failed.length > 0 || deckSyncFailedUsers > 0) {
+      const lines = failed.map(f => `- ${f.name}: ${f.error}`)
+      if (deckSyncFailedUsers > 0) lines.push(`- ${deckSyncFailedUsers} user(s) failed Moxfield deck sync`)
       await sendDiscordAlert({
-        content: `⚠️ Sync completed with ${failed.length} failure(s) (${succeeded.length} succeeded):\n${lines}`,
+        content: `⚠️ Sync completed with ${failed.length} failure(s) (${succeeded.length} succeeded):\n${lines.join('\n')}${deckNote}`,
       })
     } else {
       await sendDiscordAlert({
-        content: `✅ Sync complete: ${succeeded.length} user(s) synced successfully`,
+        content: `✅ Sync complete: ${succeeded.length} user(s) synced successfully${deckNote}`,
       })
     }
-    return Response.json({ success: true, succeeded: succeeded.length, failed: failed.length })
+    return Response.json({
+      success: true,
+      succeeded: succeeded.length,
+      failed: failed.length,
+      decksImported,
+      deckSyncFailedUsers,
+    })
   } catch (error) {
     console.error('Cron sync failed:', error)
     // Hard failure (e.g. DB unreachable) throws before the per-user loop, so no
