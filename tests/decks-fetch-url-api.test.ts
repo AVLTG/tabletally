@@ -1,6 +1,11 @@
 const mockGetSession = jest.fn()
 jest.mock('@/lib/session', () => ({ getSession: (...a: unknown[]) => mockGetSession(...a) }))
 
+const mockFetchMoxfieldApi = jest.fn()
+jest.mock('@/lib/moxfieldApi', () => ({
+  fetchMoxfieldApi: (...a: unknown[]) => mockFetchMoxfieldApi(...a),
+}))
+
 jest.mock('next/server', () => ({
   NextResponse: {
     json: jest.fn((body: unknown, init?: { status?: number }) => ({
@@ -23,11 +28,20 @@ import { POST } from '../src/app/api/decks/fetch-url/route'
 
 const MEMBER = { userId: 'u1', role: 'MEMBER', isLegacyAdmin: false }
 
+const VIEW_FIXTURE = {
+  name: 'Dragons',
+  format: 'commander',
+  commanders: { k: { quantity: 1, card: { name: 'Ur-Dragon', set: 'cmm', cn: '1' } } },
+  mainboard: { a: { quantity: 1, card: { name: 'Sol Ring', set: 'c21', cn: '263' } } },
+  sideboard: {},
+  maybeboard: {},
+}
+
 describe('POST /api/decks/fetch-url', () => {
   beforeEach(() => {
     mockGetSession.mockReset()
     mockGetSession.mockResolvedValue(MEMBER)
-    ;(global.fetch as unknown as jest.Mock | undefined)?.mockReset?.()
+    mockFetchMoxfieldApi.mockReset()
   })
 
   it('401s unauthenticated callers', async () => {
@@ -37,35 +51,21 @@ describe('POST /api/decks/fetch-url', () => {
   })
 
   it('400s non-Moxfield URLs without fetching', async () => {
-    const spy = jest.spyOn(global, 'fetch')
     const res: any = await POST(makeRequest({ url: 'https://example.com/decks/abc' }))
     expect(res.status).toBe(400)
-    expect(spy).not.toHaveBeenCalled()
-    spy.mockRestore()
+    expect(mockFetchMoxfieldApi).not.toHaveBeenCalled()
   })
 
   it('maps upstream 404 to 404 and other failures to 502', async () => {
-    global.fetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response) as typeof fetch
+    mockFetchMoxfieldApi.mockRejectedValueOnce(new Error('curl: (22) The requested URL returned error: 404'))
     expect(((await POST(makeRequest({ url: 'https://moxfield.com/decks/abc123' }))) as any).status).toBe(404)
-    global.fetch = jest.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }) as Response) as typeof fetch
+    mockFetchMoxfieldApi.mockRejectedValueOnce(new Error('ScraperAPI returned 503 for ...'))
     const res: any = await POST(makeRequest({ url: 'abc123' }))
     expect(res.status).toBe(502)
   })
 
   it('returns converted boards on success', async () => {
-    global.fetch = jest.fn(async () =>
-      ({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          name: 'Dragons',
-          format: 'commander',
-          commanders: { k: { quantity: 1, card: { name: 'Ur-Dragon', set: 'cmm', cn: '1' } } },
-          mainboard: { a: { quantity: 1, card: { name: 'Sol Ring', set: 'c21', cn: '263' } } },
-          sideboard: {},
-          maybeboard: {},
-        }),
-      }) as Response) as typeof fetch
+    mockFetchMoxfieldApi.mockResolvedValueOnce(VIEW_FIXTURE)
     const res: any = await POST(makeRequest({ url: 'https://moxfield.com/decks/abc123' }))
     expect(res.status).toBe(200)
     expect(res.body.deck.name).toBe('Dragons')

@@ -30,9 +30,13 @@ export async function fetchMoxfieldApi(pathAndQuery: string): Promise<unknown> {
     return res.json();
   }
 
-  // Local dev fallback: curl bypasses Cloudflare TLS fingerprinting
+  // Local dev fallback: curl bypasses Cloudflare TLS fingerprinting that
+  // blocks Node's fetch. --fail-with-body makes HTTP errors throw with the
+  // status code in the message (e.g. 403/404) instead of returning an HTML
+  // error page that would explode later in JSON.parse.
   const { stdout } = await execFileAsync("curl", [
     "-s",
+    "--fail-with-body",
     "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "-H", "Accept: application/json, text/plain, */*",
     "-H", "Accept-Language: en-US,en;q=0.9",
