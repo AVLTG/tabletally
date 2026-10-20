@@ -1,39 +1,6 @@
 import "server-only";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { fetchMoxfieldApi } from "@/lib/moxfieldApi";
 import type { MoxfieldCard } from "@/types/moxfield";
-
-const execFileAsync = promisify(execFile);
-
-/**
- * Fetch Moxfield API. Uses ScraperAPI in production (Cloudflare blocks
- * datacenter IPs), falls back to curl locally (residential IPs pass).
- */
-async function fetchMoxfield(targetUrl: string): Promise<unknown> {
-  const scraperApiKey = process.env.SCRAPER_API_KEY;
-
-  if (scraperApiKey) {
-    const proxyUrl = `https://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(targetUrl)}`;
-    const res = await fetch(proxyUrl);
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`ScraperAPI returned ${res.status} for ${targetUrl}: ${body}`);
-    }
-    return res.json();
-  }
-
-  // Local dev fallback: curl bypasses Cloudflare TLS fingerprinting
-  const { stdout } = await execFileAsync("curl", [
-    "-s",
-    "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "-H", "Accept: application/json, text/plain, */*",
-    "-H", "Accept-Language: en-US,en;q=0.9",
-    "-H", "Referer: https://www.moxfield.com/",
-    "-H", "Origin: https://www.moxfield.com",
-    targetUrl,
-  ]);
-  return JSON.parse(stdout);
-}
 
 export async function scrapeMoxfield({
   collectionId,
@@ -48,11 +15,11 @@ export async function scrapeMoxfield({
   const pageSize = 5000;
 
   while (hasMorePages) {
-    const apiUrl = `https://api2.moxfield.com/v1/collections/search/${collectionId}?sortType=cardName&sortDirection=ascending&pageNumber=${pageNumber}&pageSize=${pageSize}&playStyle=paperDollars&pricingProvider=cardkingdom`;
+    const apiUrl = `/v1/collections/search/${collectionId}?sortType=cardName&sortDirection=ascending&pageNumber=${pageNumber}&pageSize=${pageSize}&playStyle=paperDollars&pricingProvider=cardkingdom`;
     console.log(`Fetching page ${pageNumber}...`);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const apiData = await fetchMoxfield(apiUrl) as { data?: Record<string, any> };
+    const apiData = await fetchMoxfieldApi(apiUrl) as { data?: Record<string, any> };
 
     if (!apiData || !apiData.data) {
       break;
