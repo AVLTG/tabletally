@@ -8,15 +8,15 @@
 
 jest.mock('server-only', () => ({}), { virtual: true });
 
-process.env.SCRAPER_API_KEY = 'test-key';
-
-const mockFetch = jest.fn();
-jest.spyOn(global, 'fetch').mockImplementation((...args: any[]) => mockFetch(...args));
+const mockFetchMoxfieldApi = jest.fn();
+jest.mock('@/lib/moxfieldApi', () => ({
+  fetchMoxfieldApi: (...args: any[]) => mockFetchMoxfieldApi(...args),
+}));
 
 import { scrapeMoxfield } from '../src/lib/scrapeMoxfield/scrapeMoxfield';
 
 function page(entries: Record<string, unknown>) {
-  return { ok: true, json: async () => ({ data: entries }) };
+  return { data: entries };
 }
 
 function card(name: string, typeLine = 'Creature — Goblin') {
@@ -46,7 +46,7 @@ function fullPageWithBasics(): Record<string, unknown> {
 
 describe('scrapeMoxfield pagination', () => {
   beforeEach(() => {
-    mockFetch.mockReset();
+    mockFetchMoxfieldApi.mockReset();
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
@@ -57,13 +57,13 @@ describe('scrapeMoxfield pagination', () => {
   it('keeps paginating when a full page contains filtered basics (no silent truncation)', async () => {
     const pageTwo: Record<string, unknown> = {};
     for (let i = 0; i < 10; i++) pageTwo[`k${i}`] = card(`Tail ${i}`);
-    mockFetch
+    mockFetchMoxfieldApi
       .mockResolvedValueOnce(page(fullPageWithBasics()))
       .mockResolvedValueOnce(page(pageTwo));
 
     const cards = await scrapeMoxfield({ collectionId: 'c1' });
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetchMoxfieldApi).toHaveBeenCalledTimes(2);
     // 4995 real cards from page 1 + 10 from page 2 — not a page-1 truncation.
     expect(cards).toHaveLength(5005);
     expect(cards.some((c) => c.name === 'Tail 9')).toBe(true);
@@ -73,16 +73,16 @@ describe('scrapeMoxfield pagination', () => {
   it('stops after a short page', async () => {
     const shortPage: Record<string, unknown> = {};
     for (let i = 0; i < 42; i++) shortPage[`k${i}`] = card(`Card ${i}`);
-    mockFetch.mockResolvedValueOnce(page(shortPage));
+    mockFetchMoxfieldApi.mockResolvedValueOnce(page(shortPage));
 
     const cards = await scrapeMoxfield({ collectionId: 'c2' });
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetchMoxfieldApi).toHaveBeenCalledTimes(1);
     expect(cards).toHaveLength(42);
   });
 
   it('filters tokens out of the result', async () => {
-    mockFetch.mockResolvedValueOnce(page({
+    mockFetchMoxfieldApi.mockResolvedValueOnce(page({
       a: card('Goblin Token', 'Token Creature — Goblin'),
       b: card('Real Card'),
     }));
