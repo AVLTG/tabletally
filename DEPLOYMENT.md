@@ -131,6 +131,7 @@ Apply them to **Production** at minimum. Optionally also set them for Preview an
 | `APP_URL` | Canonical site origin used in generated invite links (falls back to the request origin) | Your production URL | `https://tabletally.example.com` |
 | `CRON_SECRET` | Bearer token Vercel sends with cron requests — must match server check | `openssl rand -hex 32` | `f9e8d7c6...` (64 hex chars) |
 | `CHROMIUM_REMOTE_EXEC_PATH` | URL to the chromium-min binary tarball used for browser scraping | Copy from releases page | `https://github.com/Sparticuz/chromium/releases/download/v143.0.4/chromium-v143.0.4-pack.x64.tar` |
+| `SCRAPER_API_KEY` | **Optional, legacy.** Last-resort proxy for Moxfield API calls — only used when both curl and the bundled Chromium browser fail. Unset it to go direct (the default path); Cloudflare blocks Node's fetch by TLS fingerprint, so direct fetches go curl → Chromium instead. | ScraperAPI dashboard | *(unset — recommended)* |
 
 **Generate secrets locally:**
 ```bash
